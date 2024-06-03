@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/widgets.dart';
 import 'dart:math';
 import 'package:vibration/vibration.dart';
 
@@ -19,7 +18,7 @@ class MyApp extends StatelessWidget {
         primaryColor: Colors.blueGrey[900], // Dark background
         useMaterial3: true,
       ),
-      home: const MyHomePage(title: 'Angle Inputter'),
+      home: const MyHomePage(title: 'Angle Game'),
     );
   }
 }
@@ -35,41 +34,72 @@ class MyHomePage extends StatefulWidget {
 class _MyHomePageState extends State<MyHomePage> {
   double _angle = 0.0;
   bool _dotPressed = false;
+  double _targetAngle = 0.0;
+  double _accuracy = 0.0;
+  double _totalAccuracy = 0.0;
+  int _attempts = 0;
+  double _previousTargetAngle = -1.0;
+  double _userAngle = 0.0;
 
-  bool _isPointInsideDot(Offset point, Offset dotCenter, double radius) {
-    return (point - dotCenter).distance <= radius;
+  @override
+  void initState() {
+    super.initState();
+    _generateNewTarget();
   }
 
-  Rect _getDotTouchTarget(Offset dotCenter, double dotRadius) {
-    const double touchTargetPadding = 24.0;
-    return Rect.fromCenter(
-      center: dotCenter,
-      width: 2 * (dotRadius + touchTargetPadding),
-      height: 2 * (dotRadius + touchTargetPadding),
-    );
+  void _generateNewTarget() {
+    double newTargetAngle;
+    do {
+      newTargetAngle = Random().nextInt(180).toDouble() + 1; // 1 to 180 degrees
+    } while (newTargetAngle == _previousTargetAngle);
+
+    setState(() {
+      _previousTargetAngle = newTargetAngle;
+      _targetAngle = newTargetAngle;
+    });
   }
 
   void _updateAngle(Offset position) {
-    final Offset center = Offset(100, 100);
-    final double radius = 100;
-
+    const Offset center = Offset(100, 100);
     double newAngle =
-        atan2(position.dy - center.dy, position.dx - center.dx) * 180 / pi;
+        atan2(center.dy - position.dy, position.dx - center.dx) * 180 / pi;
     if (newAngle < 0) newAngle += 360;
 
+    // Normalize angle to be between 0 and 360
+    newAngle = newAngle % 360;
+
+    // Restrict the angle to the top half (0 to 180 degrees)
+    if (newAngle > 180) return;
+
+    // Allow slight tolerance for snapping to 0 and 180 degrees
+    if (newAngle < 3) newAngle = 0;
+    if (newAngle > 177 && newAngle <= 180) newAngle = 180;
+
     // Snap to 1-degree increments
-    newAngle = (newAngle / 1).round() * 1;
+    newAngle = newAngle.roundToDouble();
 
     setState(() {
       _angle = newAngle;
     });
   }
 
+  void _calculateAccuracy() {
+    setState(() {
+      _accuracy = 100 - (((_angle - _targetAngle).abs() / 180) * 100);
+      _totalAccuracy += _accuracy;
+      _attempts += 1;
+      _userAngle = _angle; // Store the user's angle for display
+    });
+  }
+
+  void _resetAngle() {
+    setState(() {
+      _angle = 0.0;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Calculate display angle (0-180 degrees)
-    double displayAngle = _angle <= 180 ? _angle : 360 - _angle; 
-
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Theme.of(context).primaryColor,
@@ -82,7 +112,7 @@ class _MyHomePageState extends State<MyHomePage> {
           Padding(
             padding: const EdgeInsets.all(16.0),
             child: Text(
-              'Angle: ${displayAngle.toStringAsFixed(1)}°', 
+              'Target Angle: ${_targetAngle.toStringAsFixed(1)}°',
               style: const TextStyle(color: Colors.black, fontSize: 20),
             ),
           ),
@@ -93,16 +123,14 @@ class _MyHomePageState extends State<MyHomePage> {
                 height: 200,
                 child: GestureDetector(
                   onPanStart: (details) {
-                    final dotRadius = _dotPressed ? 12.0 : 6.0;
-                    final Offset center = Offset(100, 100);
+                    const Offset center = Offset(100, 100);
                     final Offset dotCenter = Offset(
                       center.dx + 100 * cos(_angle * pi / 180),
-                      center.dy + 100 * sin(_angle * pi / 180),
+                      center.dy - 100 * sin(_angle * pi / 180),
                     );
 
-                    // Update the touch target area based on the current dot position
-                    if (_getDotTouchTarget(dotCenter, dotRadius)
-                        .contains(details.localPosition)) {
+                    // Adjusted the touch target area to be more generous
+                    if ((details.localPosition - dotCenter).distance <= 24.0) {
                       setState(() {
                         _dotPressed = true;
                         Vibration.vibrate();
@@ -118,6 +146,9 @@ class _MyHomePageState extends State<MyHomePage> {
                     setState(() {
                       _dotPressed = false;
                     });
+                    _calculateAccuracy(); // Calculate accuracy after releasing finger
+                    _resetAngle(); // Reset angle after releasing finger
+                    _generateNewTarget(); // Generate new target angle for the next attempt
                   },
                   child: CustomPaint(
                     size: const Size(200, 200),
@@ -125,6 +156,27 @@ class _MyHomePageState extends State<MyHomePage> {
                   ),
                 ),
               ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Text(
+              'Your Angle: ${_userAngle.toStringAsFixed(1)}°',
+              style: const TextStyle(color: Colors.black, fontSize: 20),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Text(
+              'Accuracy: ${_accuracy.toStringAsFixed(1)}%',
+              style: const TextStyle(color: Colors.black, fontSize: 20),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Text(
+              'Average Accuracy: ${(_attempts > 0 ? (_totalAccuracy / _attempts) : 0).toStringAsFixed(1)}%',
+              style: const TextStyle(color: Colors.black, fontSize: 20),
             ),
           ),
         ],
@@ -144,12 +196,18 @@ class AnglePainter extends CustomPainter {
     final double radius = size.width / 2;
     final Offset center = Offset(size.width / 2, size.height / 2);
 
-    // Draw the circle
-    final circlePaint = Paint()
+    // Draw the semicircle (top half)
+    final semicirclePaint = Paint()
       ..color = const Color(0xFF212121) // Dark gray
       ..strokeWidth = 4.0
       ..style = PaintingStyle.stroke;
-    canvas.drawCircle(center, radius, circlePaint);
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius),
+      pi, // Start angle (180 degrees)
+      pi, // Sweep angle (180 degrees)
+      false,
+      semicirclePaint,
+    );
 
     // Draw the reference line
     final referenceLinePaint = Paint()
@@ -162,7 +220,7 @@ class AnglePainter extends CustomPainter {
     final double radian = angle * (pi / 180);
     final Offset endPoint = Offset(
       center.dx + radius * cos(radian),
-      center.dy + radius * sin(radian),
+      center.dy - radius * sin(radian),
     );
 
     // Draw the rotating line
@@ -173,9 +231,10 @@ class AnglePainter extends CustomPainter {
 
     // Draw the dot at the end of the rotating line
     final dotPaint = Paint()
-      ..color = Colors.black // White dot
+      ..color = Colors.black // Black dot
       ..style = PaintingStyle.fill;
     canvas.drawCircle(endPoint, dotPressed ? 12.0 : 6.0, dotPaint);
+
 
     // Draw the center dot
     final centerDotPaint = Paint()
